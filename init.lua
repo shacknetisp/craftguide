@@ -187,6 +187,23 @@ local function groups_to_item(groups)
 	return ""
 end
 
+local function get_init_items()
+	local c = 0
+	for name, def in pairs(reg_items) do
+		local is_fuel = get_fueltime(name) > 0
+		if not (def.groups.not_in_craft_guide == 1 or
+				def.groups.not_in_creative_inventory == 1) and
+				(get_recipe(name).items or is_fuel) and
+				def.description and def.description ~= "" then
+			c = c + 1
+			init_items[c] = name
+		end
+	end
+
+	sort(init_items)
+	return init_items
+end
+
 local function get_tooltip(item, recipe_type, cooktime, groups)
 	local tooltip, item_desc = "tooltip[" .. item .. ";", ""
 	local fueltime = get_fueltime(item)
@@ -383,7 +400,7 @@ local function get_formspec(player_name)
 	local ipp = data.iX * iY
 
 	if not data.items then
-		data.items = init_items
+		data.items = get_init_items()
 	end
 
 	data.pagemax = max(1, ceil(#data.items / ipp))
@@ -559,23 +576,6 @@ local function init_data(user, name)
 		get_filter_items(player_data[name], user)
 	end
 end
-
-local function get_init_items()
-	local c = 0
-	for name, def in pairs(reg_items) do
-		local is_fuel = get_fueltime(name) > 0
-		if not (def.groups.not_in_craft_guide == 1 or
-				def.groups.not_in_creative_inventory == 1) and
-				(get_recipe(name).items or is_fuel) and
-				def.description and def.description ~= "" then
-			c = c + 1
-			init_items[c] = name
-		end
-	end
-	sort(init_items)
-end
-
-mt.register_on_mods_loaded(get_init_items)
 
 local function item_in_recipe(item, recipe)
 	local item_groups = reg_items[item].groups
