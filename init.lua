@@ -13,6 +13,7 @@ local fuel_cache    = {}
 local progressive_mode = M.settings:get_bool("craftguide_progressive_mode")
 local sfinv_only = M.settings:get_bool("craftguide_sfinv_only") and rawget(_G, "sfinv")
 
+local after = M.after
 local colorize = M.colorize
 local reg_items = M.registered_items
 local get_result = M.get_craft_result
@@ -21,7 +22,6 @@ local get_player_by_name = M.get_player_by_name
 local serialize, deserialize = M.serialize, M.deserialize
 
 local ESC = M.formspec_escape
-local S = M.get_translator("craftguide")
 
 local maxn, sort, concat, insert, copy =
 	table.maxn, table.sort, table.concat, table.insert,
@@ -47,13 +47,13 @@ local FMT = {
 	label   = "label[%f,%f;%s]",
 	image   = "image[%f,%f;%f,%f;%s]",
 	button  = "button[%f,%f;%f,%f;%s;%s]",
-	tooltip = "tooltip[%s;%s]",
+	tooltip = "tooltip[%f,%f;%f,%f;%s]",
 	item_image = "item_image[%f,%f;%f,%f;%s]",
 	image_button = "image_button[%f,%f;%f,%f;%s;%s;%s]",
 	item_image_button = "item_image_button[%f,%f;%f,%f;%s;%s;%s]",
 }
 
-local group_stereotypes = {
+craftguide.group_stereotypes = {
 	wool         = "wool:white",
 	dye          = "dye:white",
 	water_bucket = "bucket:bucket_water",
@@ -119,23 +119,39 @@ local function __func()
 	return debug.getinfo(2, "n").name
 end
 
+local function is_str(x)
+	return type(x) == "string"
+end
+
+local function is_num(x)
+	return type(x) == "number"
+end
+
+local function is_table(x)
+	return type(x) == "table"
+end
+
+local function is_func(x)
+	return type(x) == "function"
+end
+
 local custom_crafts, craft_types = {}, {}
 
 function craftguide.register_craft_type(name, def)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(name, func .. "'name' field missing")
-	assert(def.description, func .. "'description' field missing")
-	assert(def.icon, func .. "'icon' field missing")
+	assert(is_str(name), func .. "'name' field missing")
+	assert(is_str(def.description), func .. "'description' field missing")
+	assert(is_str(def.icon), func .. "'icon' field missing")
 
 	craft_types[name] = def
 end
 
 function craftguide.register_craft(def)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(def.type, func .. "'type' field missing")
-	assert(def.width, func .. "'width' field missing")
-	assert(def.output, func .. "'output' field missing")
-	assert(def.items, func .. "'items' field missing")
+	assert(is_str(def.type), func .. "'type' field missing")
+	assert(is_num(def.width), func .. "'width' field missing")
+	assert(is_str(def.output), func .. "'output' field missing")
+	assert(is_table(def.items), func .. "'items' field missing")
 
 	custom_crafts[#custom_crafts + 1] = def
 end
@@ -144,8 +160,8 @@ local recipe_filters = {}
 
 function craftguide.add_recipe_filter(name, f)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(name, func .. "filter name missing")
-	assert(f and type(f) == "function", func .. "filter function missing")
+	assert(is_str(name), func .. "filter name missing")
+	assert(is_func(f), func .. "filter function missing")
 
 	recipe_filters[name] = f
 end
@@ -156,8 +172,8 @@ end
 
 function craftguide.set_recipe_filter(name, f)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(name, func .. "filter name missing")
-	assert(f and type(f) == "function", func .. "filter function missing")
+	assert(is_str(name), func .. "filter name missing")
+	assert(is_func(f), func .. "filter function missing")
 
 	recipe_filters = {[name] = f}
 end
@@ -178,8 +194,8 @@ local search_filters = {}
 
 function craftguide.add_search_filter(name, f)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(name, func .. "filter name missing")
-	assert(f and type(f) == "function", func .. "filter function missing")
+	assert(is_str(name), func .. "filter name missing")
+	assert(is_func(f), func .. "filter function missing")
 
 	search_filters[name] = f
 end
@@ -196,8 +212,9 @@ local formspec_elements = {}
 
 function craftguide.add_formspec_element(name, def)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(def.element, func .. "'element' field not defined")
-	assert(def.type, func .. "'type' field not defined")
+	assert(is_str(name), func .. "formspec element name missing")
+	assert(is_str(def.element), func .. "'element' field not defined")
+	assert(is_str(def.type), func .. "'type' field not defined")
 	assert(FMT[def.type], func .. "'" .. def.type .. "' type not supported by the API")
 
 	formspec_elements[name] = {
@@ -240,6 +257,7 @@ end
 
 local function groups_item_in_recipe(item, recipe)
 	local item_groups = reg_items[item].groups
+
 	for _, recipe_item in pairs(recipe.items) do
 		if sub(recipe_item, 1, 6) == "group:" then
 			local groups = extract_groups(recipe_item)
@@ -355,9 +373,11 @@ local function groups_to_item(groups)
 	if #groups == 1 then
 		local group = groups[1]
 		local def_gr = "default:" .. group
+		local stereotypes = craftguide.group_stereotypes
+		local stereotype = stereotypes and stereotypes[group]
 
-		if group_stereotypes[group] then
-			return group_stereotypes[group]
+		if stereotype then
+			return stereotype
 		elseif reg_items[def_gr] then
 			return def_gr
 		end
@@ -384,22 +404,22 @@ local function get_tooltip(item, groups, cooktime, burntime)
 		end
 
 		groupstr = concat(groupstr, ", ")
-		tooltip = S("Any item belonging to the group(s): @1", groupstr)
+		tooltip = "Any item belonging to the group(s): " .. groupstr
 	else
 		tooltip = reg_items[item].description
 	end
 
 	if cooktime then
 		tooltip = tooltip .. "\n" ..
-			S("Cooking time: @1", colorize("yellow", cooktime))
+			"Cooking time: " .. colorize("yellow", cooktime)
 	end
 
 	if burntime then
 		tooltip = tooltip .. "\n" ..
-			S("Burning time: @1", colorize("yellow", burntime))
+			"Burning time: " .. colorize("yellow", burntime)
 	end
 
-	return fmt(FMT.tooltip, item, ESC(tooltip))
+	return fmt("tooltip[%s;%s]", item, ESC(tooltip))
 end
 
 local function get_recipe_fs(data, iY)
@@ -413,15 +433,15 @@ local function get_recipe_fs(data, iY)
 		cooktime, width = width, 1
 	elseif width == 0 then
 		shapeless = true
-		width = min(3, #recipe.items)
+		local n = #recipe.items
+		width = n <= 4 and 2 or min(3, n)
 	end
 
 	local rows = ceil(maxn(recipe.items) / width)
 	local rightest, btn_size, s_btn_size = 0, 1.1
 
-	local btn_lab = data.show_usages and
-		ESC(S("Usage @1 of @2", data.rnum, #data.recipes)) or
-		ESC(S("Recipe @1 of @2", data.rnum, #data.recipes))
+	local btn_lab = (data.show_usages and "Usage" or "Recipe") ..
+		" " .. data.rnum .. " of " ..  #data.recipes
 
 	fs[#fs + 1] = fmt(FMT.button,
 		sfinv_only and 5.8 or data.iX - 2.6,
@@ -435,7 +455,7 @@ local function get_recipe_fs(data, iY)
 		fs[#fs + 1] = fmt(FMT.label,
 			(data.iX / 2) - 2,
 			iY + 2.2,
-			ESC(S("Recipe is too big to be displayed (@1x@2)", width, rows)))
+			"Recipe is too big to be displayed (" .. width .. "x" .. rows .. ")")
 
 		return concat(fs)
 	end
@@ -457,6 +477,7 @@ local function get_recipe_fs(data, iY)
 		end
 
 		local groups
+
 		if sub(item, 1, 6) == "group:" then
 			groups = extract_groups(item)
 			item = groups_to_item(groups)
@@ -498,7 +519,7 @@ local function get_recipe_fs(data, iY)
 			icon)
 
 		local tooltip = custom_recipe and custom_recipe.description or
-				shapeless and S("Shapeless") or S("Cooking")
+				shapeless and "Shapeless" or "Cooking"
 
 		fs[#fs + 1] = fmt("tooltip[%f,%f;%f,%f;%s]",
 			rightest + 1.2,
@@ -579,8 +600,8 @@ local function make_formspec(name)
 
 		fs[#fs + 1] = fmt([[ tooltip[size_inc;%s]
 				     tooltip[size_dec;%s] ]],
-			ESC(S("Increase window size")),
-			ESC(S("Decrease window size")))
+				    "Increase window size",
+				    "Decrease window size")
 
 		fs[#fs + 1] = fmt([[
 			image_button[%f,0.12;0.8,0.8;craftguide_zoomin_icon.png;size_inc;]
@@ -599,10 +620,10 @@ local function make_formspec(name)
 			     tooltip[clear;%s]
 			     tooltip[prev;%s]
 			     tooltip[next;%s] ]],
-		ESC(S("Search")),
-		ESC(S("Reset")),
-		ESC(S("Previous page")),
-		ESC(S("Next page")))
+			    "Search",
+			    "Reset",
+			    "Previous page",
+			    "Next page")
 
 	fs[#fs + 1] = fmt("label[%f,%f;%s / %u]",
 		sfinv_only and 6.3 or data.iX - 2.2,
@@ -619,11 +640,11 @@ local function make_formspec(name)
 	fs[#fs + 1] = fmt("field[0.3,0.32;2.5,1;filter;;%s]", ESC(data.filter))
 
 	if #data.items == 0 then
-		local no_item = S("No item to show")
+		local no_item = "No item to show"
 		local pos = (data.iX / 2) - 1
 
 		if next(recipe_filters) and #init_items > 0 and data.filter == "" then
-			no_item = S("Collect items to reveal more recipes")
+			no_item = "Collect items to reveal more recipes"
 			pos = pos - 1
 		end
 
@@ -699,12 +720,12 @@ local function search(data)
 	end
 
 	local filtered_list, c = {}, 0
-	local pattern = "^(.-)%+([%w_]+)=([%w_,]+)"
-	local search_filter = next(search_filters) and match(filter, pattern)
+	local extras = "^(.-)%+([%w_]+)=([%w_,]+)"
+	local search_filter = next(search_filters) and match(filter, extras)
 	local filters = {}
 
 	if search_filter then
-		for filter_name, values in gmatch(filter, sub(pattern, 6, -1)) do
+		for filter_name, values in gmatch(filter, sub(extras, 6, -1)) do
 			if search_filters[filter_name] then
 				values = split(values, ",")
 				filters[filter_name] = values
@@ -722,7 +743,7 @@ local function search(data)
 		if search_filter then
 			for filter_name, values in pairs(filters) do
 				local func = search_filters[filter_name]
-				to_add = func(item, values) and (not search_filter or
+				to_add = func(item, values) and (search_filter == "" or
 					find(search_in, search_filter, 1, true))
 			end
 		else
@@ -745,31 +766,6 @@ local function search(data)
 	end
 
 	data.items = filtered_list
-end
-
-local function get_inv_items(player)
-	local inv = player:get_inventory()
-	local stacks = {}
-
-	for i = 1, #item_lists do
-		local l = inv:get_list(item_lists[i])
-		stacks = table_merge(stacks, l)
-	end
-
-	local inv_items, c = {}, 0
-
-	for i = 1, #stacks do
-		local stack = stacks[i]
-		if not stack:is_empty() then
-			local name = stack:get_name()
-			if reg_items[name] then
-				c = c + 1
-				inv_items[c] = name
-			end
-		end
-	end
-
-	return inv_items
 end
 
 local function cache_usages()
@@ -872,7 +868,6 @@ local function on_receive_fields(player, fields)
 		data.pagenum = 1
 		data.iX = data.iX + (fields.size_inc and 1 or -1)
 		show_fs(player, name)
-
 	else
 		local item
 		for field in pairs(fields) do
@@ -912,14 +907,9 @@ M.register_on_joinplayer(function(player)
 	init_data(name)
 end)
 
-M.register_on_leaveplayer(function(player)
-	local name = player:get_player_name()
-	player_data[name] = nil
-end)
-
 if sfinv_only then
 	sfinv.register_page("craftguide:craftguide", {
-		title = S("Craft Guide"),
+		title = "Craft Guide",
 
 		get = function(self, player, context)
 			local name = player:get_player_name()
@@ -962,7 +952,7 @@ else
 	end
 
 	M.register_craftitem("craftguide:book", {
-		description = S("Crafting Guide"),
+		description = "Crafting Guide",
 		inventory_image = "craftguide_book.png",
 		wield_image = "craftguide_book.png",
 		stack_max = 1,
@@ -973,7 +963,7 @@ else
 	})
 
 	M.register_node("craftguide:sign", {
-		description = S("Crafting Guide Sign"),
+		description = "Crafting Guide Sign",
 		drawtype = "nodebox",
 		tiles = {"craftguide_sign.png"},
 		inventory_image = "craftguide_sign_inv.png",
@@ -1027,8 +1017,8 @@ else
 
 	if rawget(_G, "sfinv_buttons") then
 		sfinv_buttons.register_button("craftguide", {
-			title = S("Crafting Guide"),
-			tooltip = S("Shows a list of available crafting recipes, cooking recipes and fuels"),
+			title = "Crafting Guide",
+			tooltip = "Shows a list of available crafting recipes, cooking recipes and fuels",
 			image = "craftguide_book.png",
 			action = function(player)
 				on_use(player)
@@ -1091,6 +1081,31 @@ if progressive_mode then
 		return filtered
 	end
 
+	local function get_inv_items(player)
+		local inv = player:get_inventory()
+		local stacks = {}
+
+		for i = 1, #item_lists do
+			local list = inv:get_list(item_lists[i])
+			table_merge(stacks, list)
+		end
+
+		local inv_items, c = {}, 0
+
+		for i = 1, #stacks do
+			local stack = stacks[i]
+			if not stack:is_empty() then
+				local name = stack:get_name()
+				if reg_items[name] then
+					c = c + 1
+					inv_items[c] = name
+				end
+			end
+		end
+
+		return inv_items
+	end
+
 	-- Workaround. Need an engine call to detect when the contents
 	-- of the player inventory changed, instead.
 	local function poll_new_items()
@@ -1107,7 +1122,7 @@ if progressive_mode then
 			end
 		end
 
-		M.after(POLL_FREQ, poll_new_items)
+		after(POLL_FREQ, poll_new_items)
 	end
 
 	poll_new_items()
@@ -1140,17 +1155,23 @@ if progressive_mode then
 	end)
 end
 
+M.register_on_leaveplayer(function(player)
+	local name = player:get_player_name()
+	player_data[name] = nil
+end)
+
 M.register_chatcommand("craft", {
-	description = S("Show recipe(s) of the pointed node"),
+	description = "Show recipe(s) of the pointed node",
 	func = function(name)
 		local player = get_player_by_name(name)
 		local ppos   = player:get_pos()
 		local dir    = player:get_look_dir()
-		local eye_h  = {x = ppos.x, y = ppos.y + 1.625, z = ppos.z}
+
+		ppos.y = ppos.y + 1.625
 		local node_name
 
 		for i = 1, 10 do
-			local look_at = vec_add(eye_h, vec_mul(dir, i))
+			local look_at = vec_add(ppos, vec_mul(dir, i))
 			local node = M.get_node(look_at)
 
 			if node.name ~= "air" then
@@ -1162,7 +1183,7 @@ M.register_chatcommand("craft", {
 		local red = colorize("red", "[craftguide] ")
 
 		if not node_name then
-			return false, red .. S("No node pointed")
+			return false, red .. "No node pointed"
 		end
 
 		local data = player_data[name]
@@ -1185,9 +1206,9 @@ M.register_chatcommand("craft", {
 					data.show_usages = true
 				end
 			elseif recipes_cache[node_name] then
-				return false, fmt(msg, S("You don't know a recipe for this node"))
+				return false, fmt(msg, "You don't know a recipe for this node")
 			else
-				return false, fmt(msg, S("No recipe for this node"))
+				return false, fmt(msg, "No recipe for this node")
 			end
 		end
 
@@ -1200,7 +1221,7 @@ M.register_chatcommand("craft", {
 
 function craftguide.show(name, item, show_usages)
 	local func = "craftguide." .. __func() .. "(): "
-	assert(name, func .. "player name missing")
+	assert(is_str(name), func .. "player name missing")
 
 	local data   = player_data[name]
 	local player = get_player_by_name(name)
